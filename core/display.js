@@ -9,6 +9,8 @@
 
 import * as Log from './util/logging.js';
 import Base64 from "./base64.js";
+import { supportsCursorURIs, isTouchDevice } from './util/browser.js';
+import PseudoCursor from './pseudo-cursor.js';
 
 export default function Display(target) {
     this._drawCtx = null;
@@ -64,6 +66,12 @@ export default function Display(target) {
     // Check canvas features
     if (!('createImageData' in this._drawCtx)) {
         throw new Error("Canvas does not support createImageData");
+    }
+
+    // check cursor support to initialize the pseudo-cursor
+    this._psuedo_cursor = null;
+    if (!supportsCursorURIs() || isTouchDevice) {
+        this._pseudo_cursor = new PseudoCursor(this._target, this._target.parentElement);
     }
 
     this._tile16x16 = this._drawCtx.createImageData(16, 16);
@@ -498,8 +506,38 @@ Display.prototype = {
         this._damage(x, y, img.width, img.height);
     },
 
+    moveCursor: function (x, y) {
+        // this is only relevant for pseudo-cursors
+        if (this._pseudo_cursor === null) { return; }
+
+        // convert viewport-local coordinates back to real-space coordinates,
+        // relative to the canvas.
+        var realRelX = (x - this._viewportLoc.x) * this._scale;
+        var realRelY = (y - this._viewportLoc.y) * this._scale;
+
+        this._pseudo_cursor.move(x, y);
+    },
+
     changeCursor: function (pixels, mask, hotx, hoty, w, h) {
-        Display.changeCursor(this._target, pixels, mask, hotx, hoty, w, h);
+        // in the case of a pseudo-cursor, just render it
+        // to the pseudo-cursor's canvas
+        if (this._pseudo_cursor !== null) {
+            this._pseudo_cursor.change(hotx, hoty, function (canvas) {
+                Display.renderCursor(canvas, pixels, mask, hotx, hoty, w, h);
+            });
+            return;
+        }
+
+        // otherwise, update our canvas's cursor via data URIs
+        if ((w === 0) || (h === 0)) {
+            target.style.cursor = 'none';
+            return;
+        }
+
+        var canvas = document.createElement('canvas');
+        Display.renderCursor(canvas, pixels, mask, hotx, hoty, w, h);
+        var url = canvas.toDataURL();
+        this._target.style.cursor = 'url(' + url + ')' + hotx + ' ' + hoty + ', default';
     },
 
     defaultCursor: function () {
@@ -657,9 +695,10 @@ Display.prototype = {
 };
 
 // Class Methods
-Display.changeCursor = function (target, pixels, mask, hotx, hoty, w, h) {
+Display.renderCursor = function (canvas, pixels, mask, hotx, hoty, w, h) {
+    canvas.width = w;
+    canvas.height = w;
     if ((w === 0) || (h === 0)) {
-        target.style.cursor = 'none';
         return;
     }
 
@@ -677,11 +716,7 @@ Display.changeCursor = function (target, pixels, mask, hotx, hoty, w, h) {
         }
     }
 
-    var canvas = document.createElement('canvas');
     var ctx = canvas.getContext('2d');
-
-    canvas.width = w;
-    canvas.height = h;
 
     var img;
     if (SUPPORTS_IMAGEDATA_CONSTRUCTOR) {
@@ -692,7 +727,4 @@ Display.changeCursor = function (target, pixels, mask, hotx, hoty, w, h) {
     }
     ctx.clearRect(0, 0, w, h);
     ctx.putImageData(img, 0, 0);
-
-    var url = canvas.toDataURL();
-    target.style.cursor = 'url(' + url + ')' + hotx + ' ' + hoty + ', default';
 };

@@ -900,3 +900,9 @@ select:active {
     font-size: 90px;
   }
 }
+
+/* TODO: reorganize */
+.noVNC_pseudo_cursor {
+    position: fixed;
+    pointer-events: none;
+}
